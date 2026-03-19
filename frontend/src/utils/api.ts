@@ -23,10 +23,11 @@ api.interceptors.request.use(
   }
 )
 
-// 响应拦截器 - 直接返回 data
+// 响应拦截器 - 返回完整的响应数据
 api.interceptors.response.use(
   (response: AxiosResponse) => {
     console.log('API 响应:', response.status, response.data)
+    // 返回完整响应，让调用方处理 data/success 等字段
     return response.data
   },
   (error: AxiosError) => {
