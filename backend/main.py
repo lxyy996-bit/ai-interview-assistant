@@ -119,6 +119,7 @@ async def upload_resume(session_id: str, file: UploadFile = File(...)):
 
 
 @app.post("/api/v1/sessions/{session_id}/analysis")
+@app.post("/api/v1/sessions/{session_id}/analyze")
 async def analyze_resume(session_id: str):
     """分析简历并生成面试建议"""
     if session_id not in sessions:

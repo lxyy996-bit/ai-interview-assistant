@@ -2,6 +2,13 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import api from '../utils/api'
 import type { CreateSessionRequest, Session, InterviewAnalysis } from '../types'
 
+// 错误提示函数
+const showErrorAlert = (message: string) => {
+  if (typeof window !== 'undefined') {
+    window.alert(message)
+  }
+}
+
 // 创建会话
 export const useCreateSession = () => {
   return useMutation({
@@ -18,8 +25,9 @@ export const useCreateSession = () => {
           throw new Error('服务器返回数据格式错误')
         }
         return response.data.session_id
-      } catch (err) {
+      } catch (err: any) {
         console.error('创建会话请求失败:', err)
+        showErrorAlert(`创建会话失败: ${err.message}`)
         throw err
       }
     },
@@ -31,11 +39,17 @@ export const useSession = (sessionId: string) => {
   return useQuery({
     queryKey: ['session', sessionId],
     queryFn: async () => {
-      const response = await api.get(`/sessions/${sessionId}`) as { success: boolean; data?: Session; error_message?: string }
-      if (!response.success) {
-        throw new Error(response.error_message || '获取会话失败')
+      try {
+        const response = await api.get(`/sessions/${sessionId}`) as { success: boolean; data?: Session; error_message?: string }
+        if (!response.success) {
+          throw new Error(response.error_message || '获取会话失败')
+        }
+        return response.data!
+      } catch (err: any) {
+        console.error('获取会话失败:', err)
+        showErrorAlert(`获取会话失败: ${err.message}`)
+        throw err
       }
-      return response.data!
     },
     enabled: !!sessionId,
   })
@@ -45,19 +59,25 @@ export const useSession = (sessionId: string) => {
 export const useUploadResume = () => {
   return useMutation({
     mutationFn: async ({ sessionId, file }: { sessionId: string; file: File }) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      
-      const response = await api.post(`/sessions/${sessionId}/resume`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }) as { success: boolean; data?: { success: boolean; text_length: number; skills_detected: string[] }; error_message?: string }
-      
-      if (!response.success) {
-        throw new Error(response.error_message || '上传简历失败')
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        
+        const response = await api.post(`/sessions/${sessionId}/resume`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }) as { success: boolean; data?: { success: boolean; text_length: number; skills_detected: string[] }; error_message?: string }
+        
+        if (!response.success) {
+          throw new Error(response.error_message || '上传简历失败')
+        }
+        return response.data!
+      } catch (err: any) {
+        console.error('上传简历失败:', err)
+        showErrorAlert(`上传简历失败: ${err.message}`)
+        throw err
       }
-      return response.data!
     },
   })
 }
@@ -66,11 +86,31 @@ export const useUploadResume = () => {
 export const useStartAnalysis = () => {
   return useMutation({
     mutationFn: async (sessionId: string) => {
-      const response = await api.post(`/sessions/${sessionId}/analyze`) as { success: boolean; data?: InterviewAnalysis; error_message?: string }
-      if (!response.success) {
-        throw new Error(response.error_message || '分析失败')
+      try {
+        const response = await api.post(`/sessions/${sessionId}/analyze`, {}, {
+          timeout: 60000, // 60秒超时
+        }) as { success: boolean; data?: InterviewAnalysis; error_message?: string }
+        
+        if (!response.success) {
+          throw new Error(response.error_message || '分析失败')
+        }
+        return response.data!
+      } catch (err: any) {
+        console.error('分析失败:', err)
+        
+        // 根据错误类型显示不同提示
+        let errorMsg = err.message || '分析失败'
+        if (err.name === 'TimeoutError' || err.message?.includes('超时')) {
+          errorMsg = '分析请求超时（60秒），服务器响应过慢，请稍后重试'
+        } else if (err.name === 'NotFoundError' || err.message?.includes('不存在')) {
+          errorMsg = '分析接口未找到，请联系管理员检查后端服务'
+        } else if (err.name === 'NetworkError' || err.message?.includes('网络')) {
+          errorMsg = '网络连接失败，请检查网络后重试'
+        }
+        
+        showErrorAlert(`分析失败: ${errorMsg}`)
+        throw err
       }
-      return response.data!
     },
   })
 }
@@ -80,11 +120,17 @@ export const useAnalysisResult = (sessionId: string) => {
   return useQuery({
     queryKey: ['analysis', sessionId],
     queryFn: async () => {
-      const response = await api.get(`/sessions/${sessionId}/result`) as { success: boolean; data?: InterviewAnalysis; error_message?: string }
-      if (!response.success) {
-        throw new Error(response.error_message || '获取结果失败')
+      try {
+        const response = await api.get(`/sessions/${sessionId}/result`) as { success: boolean; data?: InterviewAnalysis; error_message?: string }
+        if (!response.success) {
+          throw new Error(response.error_message || '获取结果失败')
+        }
+        return response.data!
+      } catch (err: any) {
+        console.error('获取结果失败:', err)
+        showErrorAlert(`获取结果失败: ${err.message}`)
+        throw err
       }
-      return response.data!
     },
     enabled: !!sessionId,
   })
