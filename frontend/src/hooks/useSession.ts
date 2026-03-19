@@ -47,6 +47,9 @@ export const useSession = (sessionId: string) => {
   return useQuery({
     queryKey: ['session', sessionId],
     queryFn: async () => {
+      if (!sessionId) {
+        throw new Error('会话ID不能为空')
+      }
       try {
         const response = await api.get(`/sessions/${sessionId}`) as ApiResponse<Session>
         if (!response.success) {
@@ -55,7 +58,10 @@ export const useSession = (sessionId: string) => {
         return response.data!
       } catch (err: any) {
         console.error('获取会话失败:', err)
-        showErrorAlert(`获取会话失败: ${err.message}`)
+        // 只在非空 sessionId 时显示错误
+        if (sessionId) {
+          showErrorAlert(`获取会话失败: ${err.message}`)
+        }
         throw err
       }
     },
