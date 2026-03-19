@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Loader2, Brain, Search, FileSearch } from 'lucide-react'
 import { useStartAnalysis, useSession } from '../hooks/useSession'
@@ -8,19 +8,47 @@ export default function AnalysisPage() {
   const navigate = useNavigate()
   const startAnalysis = useStartAnalysis()
   const { data: session } = useSession(sessionId || '')
+  const hasStarted = useRef(false)
+  const hasNavigated = useRef(false)
+
+  // 使用 useCallback 稳定化回调函数
+  const handleSuccess = useCallback(() => {
+    if (!hasNavigated.current && sessionId) {
+      hasNavigated.current = true
+      console.log('分析成功，准备跳转到结果页:', sessionId)
+      navigate(`/result/${sessionId}`)
+    }
+  }, [navigate, sessionId])
+
+  const handleError = useCallback((error: Error) => {
+    console.error('分析失败:', error)
+    // 重置标志，允许用户刷新重试
+    hasStarted.current = false
+  }, [])
 
   useEffect(() => {
-    if (sessionId && session && !startAnalysis.isPending && !startAnalysis.isSuccess) {
+    // 防止重复调用
+    if (hasStarted.current) return
+    
+    // 确保 session 数据已加载且分析未开始
+    if (sessionId && session && !startAnalysis.isPending && !startAnalysis.isSuccess && !startAnalysis.isError) {
+      hasStarted.current = true
+      console.log('开始分析，sessionId:', sessionId)
+      
       startAnalysis.mutate(sessionId, {
-        onSuccess: () => {
-          navigate(`/result/${sessionId}`)
-        },
-        onError: (error) => {
-          console.error('分析失败:', error)
-        }
+        onSuccess: handleSuccess,
+        onError: handleError
       })
     }
-  }, [sessionId, session, startAnalysis, navigate])
+  }, [sessionId, session, startAnalysis, handleSuccess, handleError])
+
+  // 监听分析状态变化，确保成功后跳转
+  useEffect(() => {
+    if (startAnalysis.isSuccess && !hasNavigated.current) {
+      console.log('检测到分析成功状态，执行跳转')
+      handleSuccess()
+    }
+  }, [startAnalysis.isSuccess, handleSuccess])
 
   const steps = [
     {

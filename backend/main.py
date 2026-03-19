@@ -7,7 +7,7 @@ import io
 import uuid
 import asyncio
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -21,10 +21,16 @@ load_dotenv()
 from services.baidu_search import BaiduSearchClient, format_search_results_for_llm
 from services.llm_service import LLMService
 
+# 导入鉴权模块
+from auth import init_db, router as auth_router, admin_router, get_current_user
+from auth.services import QuotaService, AdminService, AuthError
+from sqlalchemy.orm import Session
+from auth.models import get_db
+
 app = FastAPI(
     title="AI 智能面试助手 API",
     description="基于 STAR 法则的面试准备系统后端",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 # CORS 配置
@@ -36,6 +42,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 初始化数据库
+init_db()
+
+# 注册鉴权路由
+app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 # ============ 数据模型 ============
@@ -118,7 +131,7 @@ async def parse_resume_file(file: UploadFile) -> str:
                         text += page_text + "\n"
             
             if not text.strip():
-                return f"[PDF简历] 文件名: {file.filename}, 未能提取文本内容"
+                raise ValueError(f"PDF文件无法解析，未能提取文本内容。请检查文件是否正确或尝试转换为Word格式上传")
             
             # 截断过长的简历（避免超出 LLM token 限制）
             max_length = 8000
@@ -134,7 +147,7 @@ async def parse_resume_file(file: UploadFile) -> str:
             text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
             
             if not text.strip():
-                return f"[Word简历] 文件名: {file.filename}, 未能提取文本内容"
+                raise ValueError(f"Word文件无法解析，未能提取文本内容。请检查文件是否正确或尝试转换为PDF格式上传")
             
             # 截断过长的简历
             max_length = 8000
@@ -145,11 +158,11 @@ async def parse_resume_file(file: UploadFile) -> str:
             return text
             
         else:
-            return f"[不支持的文件格式] 文件名: {file.filename}, 请上传 PDF 或 Word 文件"
+            raise ValueError(f"不支持的文件格式，请上传 PDF 或 Word (.docx) 文件")
             
     except Exception as e:
         print(f"[简历解析] 错误: {str(e)}")
-        return f"[简历解析失败] 文件名: {file.filename}, 错误: {str(e)}"
+        raise ValueError(f"简历解析失败: {str(e)}")
 
 
 # ============ API 路由 ============
@@ -325,14 +338,20 @@ async def upload_resume(session_id: str, file: UploadFile = File(...)):
 
 @app.post("/api/v1/sessions/{session_id}/analysis")
 @app.post("/api/v1/sessions/{session_id}/analyze")
-async def analyze_resume(session_id: str):
+async def analyze_resume(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    分析简历并生成面试建议
+    分析简历并生成面试建议（需要登录）
     
     完整流程：
-    1. 生成搜索关键词（LLM-1）
-    2. 执行百度搜索
-    3. 深度分析（LLM-2）
+    1. 检查剩余次数（不扣减）
+    2. 生成搜索关键词（LLM-1）
+    3. 执行百度搜索
+    4. 深度分析（LLM-2）
+    5. 成功后扣减使用次数
     """
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -341,6 +360,15 @@ async def analyze_resume(session_id: str):
     
     if not session.get("has_resume"):
         raise HTTPException(status_code=400, detail="请先上传简历")
+    
+    # 1. 先检查剩余次数（不扣减）
+    try:
+        quota_info = QuotaService.get_quota(db, current_user["phone_hash"])
+        if quota_info["remaining_quota"] <= 0:
+            raise HTTPException(status_code=403, detail={"code": 1002, "message": "使用次数已用完"})
+        print(f"[Session {session_id}] 当前剩余次数: {quota_info['remaining_quota']}")
+    except AuthError as e:
+        raise HTTPException(status_code=403, detail={"code": e.code, "message": e.message})
     
     try:
         # 初始化服务
@@ -408,46 +436,31 @@ async def analyze_resume(session_id: str):
         session["has_analysis"] = True
         session["analysis"] = analysis_result
         
+        # 5. 分析成功后扣减使用次数
+        try:
+            quota_result = QuotaService.consume_quota(
+                db=db,
+                phone_hash=current_user["phone_hash"],
+                feature="interview",
+                feature_name="模拟面试分析",
+                session_id=session_id,
+                metadata={
+                    "company": session["company"],
+                    "job_name": session["job_name"]
+                }
+            )
+            print(f"[Session {session_id}] 分析成功，次数扣减成功，剩余: {quota_result['remaining_quota']}")
+            # 将剩余次数添加到返回结果中
+            analysis_result["remaining_quota"] = quota_result["remaining_quota"]
+        except Exception as quota_error:
+            print(f"[Session {session_id}] 次数扣减失败（但不影响返回结果）: {quota_error}")
+        
         return {"success": True, "data": analysis_result}
         
     except Exception as e:
         print(f"[Session {session_id}] 分析失败: {str(e)}")
-        # 返回模拟数据作为降级方案
-        fallback_analysis = {
-            "company_strategy": {
-                "business_status": f"{session['company']} 正在快速发展期，注重技术创新和业务扩张",
-                "job_subtext": "需要具备强技术背景和快速学习能力的人才"
-            },
-            "ats_score": {
-                "score": 75,
-                "advantages": ["技术栈匹配度高", "项目经验丰富"],
-                "gaps": ["可以补充更多量化成果", "建议增加云原生相关经验"]
-            },
-            "resume_suggestions": {
-                "logic": "建议突出项目中的技术亮点和量化成果",
-                "rewrite_demo": {
-                    "original": "负责开发用户管理系统",
-                    "rewritten": "独立设计并开发用户管理系统，支持10万+并发用户，系统可用性达99.9%",
-                    "reasoning": "增加量化数据，突出技术能力和成果"
-                },
-                "new_keywords": ["微服务", "Kubernetes", "高并发", "性能优化"]
-            },
-            "star_questions": {
-                "background": "基于你的简历和岗位要求，我们准备了以下 STAR 法则面试题",
-                "questions": [
-                    "请描述一个你解决过的最复杂的技术问题，当时的情况如何？",
-                    "举例说明你如何在团队中推动技术方案落地",
-                    "描述一次项目延期经历，你是如何应对的？",
-                    "请分享一个你优化系统性能的具体案例",
-                    "举例说明你是如何学习新技术并应用到项目中的"
-                ]
-            }
-        }
-        
-        session["has_analysis"] = True
-        session["analysis"] = fallback_analysis
-        
-        return {"success": True, "data": fallback_analysis}
+        # 分析失败不扣减次数，直接返回错误
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
 
 
 @app.get("/api/v1/sessions/{session_id}/result")

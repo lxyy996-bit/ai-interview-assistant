@@ -1,4 +1,5 @@
 import { useParams } from 'react-router-dom'
+import { useEffect } from 'react'
 import { 
   Building2, 
   Target, 
@@ -10,11 +11,35 @@ import {
   Lightbulb
 } from 'lucide-react'
 import { useAnalysisResult, useSession } from '../hooks/useSession'
+import api from '../utils/api'
 
 export default function ResultPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const { data: analysis, isLoading } = useAnalysisResult(sessionId || '')
   const { data: session } = useSession(sessionId || '')
+  
+  // 页面加载时刷新配额信息
+  useEffect(() => {
+    const refreshQuota = async () => {
+      try {
+        const response = await api.get('/auth/quota') as any
+        if (response.code === 0 && response.data) {
+          // 更新 localStorage 中的用户信息
+          const stored = localStorage.getItem('user_info')
+          if (stored) {
+            const userInfo = JSON.parse(stored)
+            userInfo.remaining_quota = response.data.remaining_quota
+            userInfo.used_quota = response.data.used_quota
+            localStorage.setItem('user_info', JSON.stringify(userInfo))
+          }
+        }
+      } catch (err) {
+        console.error('刷新配额失败:', err)
+      }
+    }
+    
+    refreshQuota()
+  }, [])
 
   if (isLoading) {
     return (
