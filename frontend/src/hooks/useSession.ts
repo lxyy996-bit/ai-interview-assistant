@@ -102,7 +102,7 @@ export const useStartAnalysis = () => {
     mutationFn: async (sessionId: string) => {
       try {
         const response = await api.post(`/sessions/${sessionId}/analyze`, {}, {
-          timeout: 60000, // 60秒超时
+          timeout: 120000, // 120秒超时（分析流程可能耗时较长）
         }) as ApiResponse<InterviewAnalysis>
         
         if (!response.success) {

@@ -8,7 +8,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 60000, // 60秒超时
+  timeout: 120000, // 120秒超时（分析流程可能耗时较长）
 })
 
 // 请求拦截器
