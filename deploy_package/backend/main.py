@@ -25,8 +25,7 @@ from services.llm_service import LLMService
 from auth import init_db, router as auth_router, admin_router, get_current_user
 from auth.services import QuotaService, AdminService, AuthError
 from sqlalchemy.orm import Session
-from auth.models import get_db, SessionLocal
-from auth.models import SessionData as SessionDataModel
+from auth.models import get_db
 
 app = FastAPI(
     title="AI 智能面试助手 API",
@@ -106,91 +105,6 @@ class ApiResponse(BaseModel):
 # ============ 内存数据存储 ============
 
 sessions = {}
-
-
-# ============ 会话持久化辅助函数 ============
-
-def save_session_to_db(session_id: str, session_data: dict):
-    """保存会话数据到数据库"""
-    db = SessionLocal()
-    try:
-        # 检查是否已存在
-        db_session = db.query(SessionDataModel).filter(SessionDataModel.id == session_id).first()
-        if db_session:
-            # 更新
-            db_session.company = session_data.get("company", "")
-            db_session.job_name = session_data.get("job_name", "")
-            db_session.city = session_data.get("city", "")
-            db_session.jd = session_data.get("jd", "")
-            db_session.resume_text = session_data.get("resume_text", "")
-            db_session.has_resume = 1 if session_data.get("has_resume") else 0
-            db_session.has_analysis = 1 if session_data.get("has_analysis") else 0
-            db_session.analysis_data = session_data.get("analysis")
-            db_session.search_results = session_data.get("search_results")
-        else:
-            # 创建新记录
-            db_session = SessionDataModel(
-                id=session_id,
-                company=session_data.get("company", ""),
-                job_name=session_data.get("job_name", ""),
-                city=session_data.get("city", ""),
-                jd=session_data.get("jd", ""),
-                resume_text=session_data.get("resume_text", ""),
-                has_resume=1 if session_data.get("has_resume") else 0,
-                has_analysis=1 if session_data.get("has_analysis") else 0,
-                analysis_data=session_data.get("analysis"),
-                search_results=session_data.get("search_results")
-            )
-            db.add(db_session)
-        db.commit()
-        print(f"[Session {session_id}] 已持久化到数据库")
-    except Exception as e:
-        print(f"[Session {session_id}] 持久化失败: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def load_session_from_db(session_id: str) -> dict:
-    """从数据库加载会话数据"""
-    db = SessionLocal()
-    try:
-        db_session = db.query(SessionDataModel).filter(SessionDataModel.id == session_id).first()
-        if db_session:
-            return {
-                "id": db_session.id,
-                "company": db_session.company,
-                "job_name": db_session.job_name,
-                "city": db_session.city,
-                "jd": db_session.jd,
-                "resume_text": db_session.resume_text or "",
-                "has_resume": bool(db_session.has_resume),
-                "has_analysis": bool(db_session.has_analysis),
-                "analysis": db_session.analysis_data or {},
-                "search_results": db_session.search_results or {},
-                "created_at": db_session.created_at.isoformat() if db_session.created_at else None
-            }
-        return None
-    except Exception as e:
-        print(f"[Session {session_id}] 从数据库加载失败: {e}")
-        return None
-    finally:
-        db.close()
-
-
-def get_or_load_session(session_id: str) -> dict:
-    """获取会话，如果内存中没有则从数据库加载"""
-    if session_id in sessions:
-        return sessions[session_id]
-    
-    # 尝试从数据库加载
-    session_data = load_session_from_db(session_id)
-    if session_data:
-        sessions[session_id] = session_data
-        print(f"[Session {session_id}] 从数据库加载到内存")
-        return session_data
-    
-    return None
 
 
 # ============ 辅助函数 ============
@@ -375,7 +289,7 @@ async def debug_keywords_and_search(data: dict):
 async def create_session(request: CreateSessionRequest):
     """创建面试会话"""
     session_id = str(uuid.uuid4())
-    session_data = {
+    sessions[session_id] = {
         "id": session_id,
         "company": request.company,
         "job_name": request.job_name,
@@ -387,26 +301,21 @@ async def create_session(request: CreateSessionRequest):
         "search_results": None,
         "analysis": None
     }
-    sessions[session_id] = session_data
-    # 持久化到数据库
-    save_session_to_db(session_id, session_data)
     return {"success": True, "data": {"session_id": session_id}}
 
 
 @app.get("/api/v1/sessions/{session_id}")
 async def get_session(session_id: str):
     """获取会话信息"""
-    session = get_or_load_session(session_id)
-    if not session:
+    if session_id not in sessions:
         raise HTTPException(status_code=404, detail="会话不存在")
-    return {"success": True, "data": session}
+    return {"success": True, "data": sessions[session_id]}
 
 
 @app.post("/api/v1/sessions/{session_id}/resume")
 async def upload_resume(session_id: str, file: UploadFile = File(...)):
     """上传简历"""
-    session = get_or_load_session(session_id)
-    if not session:
+    if session_id not in sessions:
         raise HTTPException(status_code=404, detail="会话不存在")
     
     try:
@@ -415,9 +324,6 @@ async def upload_resume(session_id: str, file: UploadFile = File(...)):
         
         sessions[session_id]["has_resume"] = True
         sessions[session_id]["resume_text"] = resume_text
-        
-        # 持久化到数据库
-        save_session_to_db(session_id, sessions[session_id])
         
         return {
             "success": True, 
@@ -447,9 +353,10 @@ async def analyze_resume(
     4. 深度分析（LLM-2）
     5. 成功后扣减使用次数
     """
-    session = get_or_load_session(session_id)
-    if not session:
+    if session_id not in sessions:
         raise HTTPException(status_code=404, detail="会话不存在")
+    
+    session = sessions[session_id]
     
     if not session.get("has_resume"):
         raise HTTPException(status_code=400, detail="请先上传简历")
@@ -526,13 +433,8 @@ async def analyze_resume(
         )
         
         # 保存分析结果
-        sessions[session_id]["has_analysis"] = True
-        sessions[session_id]["analysis"] = analysis_result
-        sessions[session_id]["search_results"] = search_results
-        
-        # 持久化到数据库（关键：确保分析结果保存到数据库）
-        save_session_to_db(session_id, sessions[session_id])
-        print(f"[Session {session_id}] 分析结果已持久化到数据库")
+        session["has_analysis"] = True
+        session["analysis"] = analysis_result
         
         # 5. 分析成功后扣减使用次数
         try:
@@ -564,9 +466,10 @@ async def analyze_resume(
 @app.get("/api/v1/sessions/{session_id}/result")
 async def get_result(session_id: str):
     """获取完整分析结果"""
-    session = get_or_load_session(session_id)
-    if not session:
+    if session_id not in sessions:
         raise HTTPException(status_code=404, detail="会话不存在")
+    
+    session = sessions[session_id]
     
     if not session.get("has_analysis"):
         raise HTTPException(status_code=400, detail="尚未完成分析")

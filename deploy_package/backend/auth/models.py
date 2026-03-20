@@ -112,41 +112,6 @@ class AdminUser(Base):
     last_login_at = Column(DateTime, nullable=True)
 
 
-class SessionData(Base):
-    """会话数据表 - 持久化存储分析结果"""
-    __tablename__ = "session_data"
-    
-    id = Column(String(64), primary_key=True)  # session_id
-    company = Column(String(100), nullable=False)
-    job_name = Column(String(100), nullable=False)
-    city = Column(String(50), nullable=False)
-    jd = Column(String(5000), nullable=False)
-    resume_text = Column(String(20000), nullable=True)
-    has_resume = Column(Integer, nullable=False, default=0)  # 0/1
-    has_analysis = Column(Integer, nullable=False, default=0)  # 0/1
-    analysis_data = Column(JSON, nullable=True)  # 分析结果
-    search_results = Column(JSON, nullable=True)  # 搜索结果
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    def to_dict(self):
-        """转换为字典"""
-        return {
-            "id": self.id,
-            "company": self.company,
-            "job_name": self.job_name,
-            "city": self.city,
-            "jd": self.jd,
-            "resume_text": self.resume_text or "",
-            "has_resume": bool(self.has_resume),
-            "has_analysis": bool(self.has_analysis),
-            "analysis": self.analysis_data or {},
-            "search_results": self.search_results or {},
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None
-        }
-
-
 # 创建所有表
 def init_db():
     """初始化数据库"""
