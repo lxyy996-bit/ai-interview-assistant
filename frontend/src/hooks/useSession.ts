@@ -1,4 +1,5 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import type { CreateSessionRequest, Session, InterviewAnalysis } from '../types'
 
@@ -98,34 +99,43 @@ export const useUploadResume = () => {
 
 // 开始分析
 export const useStartAnalysis = () => {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  
   return useMutation({
     mutationFn: async (sessionId: string) => {
-      try {
-        const response = await api.post(`/sessions/${sessionId}/analyze`, {}, {
-          timeout: 120000, // 120秒超时（分析流程可能耗时较长）
-        }) as ApiResponse<InterviewAnalysis>
-        
-        if (!response.success) {
-          throw new Error(response.error_message || '分析失败')
-        }
-        return response.data!
-      } catch (err: any) {
-        console.error('分析失败:', err)
-        
-        // 根据错误类型显示不同提示
-        let errorMsg = err.message || '分析失败'
-        if (err.name === 'TimeoutError' || err.message?.includes('超时')) {
-          errorMsg = '分析请求超时（60秒），服务器响应过慢，请稍后重试'
-        } else if (err.name === 'NotFoundError' || err.message?.includes('不存在')) {
-          errorMsg = '分析接口未找到，请联系管理员检查后端服务'
-        } else if (err.name === 'NetworkError' || err.message?.includes('网络')) {
-          errorMsg = '网络连接失败，请检查网络后重试'
-        }
-        
-        showErrorAlert(`分析失败: ${errorMsg}`)
-        throw err
+      const response = await api.post(`/sessions/${sessionId}/analyze`, {}, {
+        timeout: 120000, // 120秒超时（分析流程可能耗时较长）
+      }) as ApiResponse<InterviewAnalysis>
+      
+      if (!response.success) {
+        throw new Error(response.error_message || '分析失败')
       }
+      return response.data!
     },
+    onSuccess: (data, sessionId) => {
+      console.log('分析成功，准备跳转，数据:', data)
+      // 刷新 session 数据
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
+      queryClient.invalidateQueries({ queryKey: ['analysis', sessionId] })
+      // 跳转到结果页
+      navigate(`/result/${sessionId}`)
+    },
+    onError: (err: any) => {
+      console.error('分析失败:', err)
+      
+      // 根据错误类型显示不同提示
+      let errorMsg = err.message || '分析失败'
+      if (err.name === 'TimeoutError' || err.message?.includes('超时')) {
+        errorMsg = '分析请求超时（60秒），服务器响应过慢，请稍后重试'
+      } else if (err.name === 'NotFoundError' || err.message?.includes('不存在')) {
+        errorMsg = '分析接口未找到，请联系管理员检查后端服务'
+      } else if (err.name === 'NetworkError' || err.message?.includes('网络')) {
+        errorMsg = '网络连接失败，请检查网络后重试'
+      }
+      
+      showErrorAlert(`分析失败: ${errorMsg}`)
+    }
   })
 }
 
