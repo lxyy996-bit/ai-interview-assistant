@@ -21,7 +21,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const adminToken = localStorage.getItem('admin_token')
   if (!adminToken) {
-    return <Navigate to="/admin/login" replace />
+    return <Navigate to="/manage/login" replace />
   }
   return <>{children}</>
 }
@@ -30,21 +30,24 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 用户登录 */}
+        {/* 用户登录页（首页） */}
         <Route path="/login" element={<LoginPage />} />
         
+        {/* 默认重定向到登录页 */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        
         {/* 管理员登录 */}
-        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/manage/login" element={<AdminLoginPage />} />
         
         {/* 管理员后台 */}
-        <Route path="/admin" element={
+        <Route path="/manage" element={
           <AdminRoute>
             <AdminDashboard />
           </AdminRoute>
         } />
         
         {/* 用户页面（需要登录） */}
-        <Route path="/" element={
+        <Route path="/home" element={
           <ProtectedRoute>
             <Layout>
               <HomePage />

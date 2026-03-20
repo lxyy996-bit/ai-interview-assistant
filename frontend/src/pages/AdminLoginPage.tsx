@@ -24,7 +24,7 @@ export default function AdminLoginPage() {
         localStorage.setItem('admin_info', JSON.stringify(response.data.admin))
         
         // 跳转到管理后台
-        navigate('/admin')
+        navigate('/manage')
       } else {
         setError(response.message || '登录失败')
       }

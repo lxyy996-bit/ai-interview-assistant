@@ -30,7 +30,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const adminToken = localStorage.getItem('admin_token')
     if (!adminToken) {
-      navigate('/admin/login')
+      navigate('/manage/login')
       return
     }
     fetchWhitelist()
@@ -110,7 +110,7 @@ export default function AdminDashboard() {
   const handleLogout = () => {
     localStorage.removeItem('admin_token')
     localStorage.removeItem('admin_info')
-    navigate('/admin/login')
+    navigate('/manage/login')
   }
 
   if (loading) {

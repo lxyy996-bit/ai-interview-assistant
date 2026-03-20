@@ -23,7 +23,7 @@ export default function LoginPage() {
         localStorage.setItem('user_info', JSON.stringify(response.data.user))
         
         // 跳转到首页
-        navigate('/')
+        navigate('/home')
       } else {
         setError(response.message || '登录失败')
       }
